@@ -5,10 +5,11 @@ import (
 	//	"encoding/json"
 	"errors"
 	"fmt"
+
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/orm"
 	"github.com/pili-engineering/pili-sdk-go/pili"
-//	"reflect"
+	//	"reflect"
 )
 
 const (
@@ -62,6 +63,7 @@ func (c *ApiController) responseWithState(state string, args ...interface{}) {
 func (c *ApiController) getPiliStreamByName(streamName string) (stream pili.Stream, err error) {
 	cam, err := c.getCamByStreamName(streamName)
 	if err != nil {
+		beego.Debug("getCamByStreamName")
 		return stream, err
 	}
 	credentials := pili.NewCredentials(ACCESS_KEY, SECRET_KEY)
@@ -183,6 +185,33 @@ func (c *ApiController) DelDevice() {
 
 	c.responseWithState(resSucess)
 }
+
+func (c *ApiController) findStream(streamName string) (pili.Stream, error) {
+	credentials := pili.NewCredentials(ACCESS_KEY, SECRET_KEY)
+	hub := pili.NewHub(credentials, HUB_NAME)
+	options := pili.OptionalArguments{ // optional
+		//Status: "connected", // optional
+		//Marker: "",          // optional, returned by server response
+		Limit: 5000, // optional
+		Hub:   HUB_NAME,
+		Title: streamName, // optional, title prefix
+	}
+	listResult, err := hub.ListStreams(options)
+	if err != nil {
+		beego.Debug(err)
+	}
+	var ret pili.Stream
+	for _, stream := range listResult.Items {
+		beego.Debug("finds stream:stream.Title:", stream.Title)
+		beego.Debug("Stream:", stream)
+		if stream.Title == streamName {
+			ret = *stream
+			break
+		}
+	}
+	return ret, errors.New("find nothing")
+}
+
 func (c *ApiController) NewDevice() {
 	beego.Debug("NewDevice")
 
@@ -212,9 +241,14 @@ func (c *ApiController) NewDevice() {
 	}
 	stream, err := hub.CreateStream(options)
 	if err != nil {
-		c.responseWithState(resFail)
-		beego.Error(err)
-		return
+		//c.responseWithState(resFail)
+		beego.Debug(err)
+		//return
+		stream, err = c.findStream(streamName)
+		if err == nil {
+			beego.Error("Error happen:", err)
+			return
+		}
 	}
 
 	beego.Debug("stream_state!!!!!! :", stream.Disabled)
@@ -315,48 +349,46 @@ func (c *ApiController) GetHlsPlayBackUrl() {
 		c.responseWithState(resFail)
 		return
 	}
-	
+
 	urls := make(map[string]string)
 	urls["ORIGIN"] = fmt.Sprintf("http://%s/%s/%s.m3u8", stream.Hosts.Playback["hls"], stream.Hub, stream.Title)
-	urls["start"] =  fmt.Sprintf("%d", start)
-	urls["end"] =  fmt.Sprintf("%d", end)
-	
+	urls["start"] = fmt.Sprintf("%d", start)
+	urls["end"] = fmt.Sprintf("%d", end)
+
 	/*
-	urls, err := stream.HlsPlaybackUrls(int64(start), int64(end))
-	if err != nil {
-		beego.Error(err)
-		c.responseWithState(resFail)
-		return
-	}
+		urls, err := stream.HlsPlaybackUrls(int64(start), int64(end))
+		if err != nil {
+			beego.Error(err)
+			c.responseWithState(resFail)
+			return
+		}
 	*/
 	beego.Debug(urls)
 	c.responseWithState(resSucess, map[string]interface{}{"stream_name": streamName, "hls_playback_url": urls})
 	return
 }
 
-
-func (c * ApiController) GetVideoCut() {
+func (c *ApiController) GetVideoCut() {
 	beego.Debug("GetVideoCut")
-	
+
 	streamName := c.GetString("stream_name", "")
-	videoName   := c.GetString("video_name", "")
-	streamFormat   := c.GetString("video_format", "")
+	videoName := c.GetString("video_name", "")
+	streamFormat := c.GetString("video_format", "")
 	start, err1 := c.GetInt32("start")
 	end, err2 := c.GetInt32("end")
-	if (streamName == "" || streamFormat == "" || err1 != nil || err2 != nil) {
+	if streamName == "" || streamFormat == "" || err1 != nil || err2 != nil {
 		beego.Error(err1, err2)
-		c.responseWithState(resFail)	
+		c.responseWithState(resFail)
 		return
 	}
-	
-	stream, err := c.getPiliStreamByName(streamName)
-	
 
-	if (err != nil) {
+	stream, err := c.getPiliStreamByName(streamName)
+
+	if err != nil {
 		beego.Debug(err)
 		c.responseWithState(resFail)
-		return		
-	}	
+		return
+	}
 	options := pili.OptionalArguments{
 	//	NotifyUrl: "http://remote_callback_url",
 	} // optional
@@ -364,11 +396,11 @@ func (c * ApiController) GetVideoCut() {
 	if err != nil {
 		fmt.Println("Error:", err)
 	}
-	
+
 	beego.Debug("saveAsRes:", saveAsRes)
-	
+
 	c.responseWithState(resSucess, map[string]interface{}{"stream_name": streamName, "save_result": saveAsRes})
-	
+
 }
 
 func (c *ApiController) GetSnot() {
@@ -386,14 +418,13 @@ func (c *ApiController) GetSnot() {
 		return
 	}
 	stream, err := c.getPiliStreamByName(streamName)
-	
 
-	if (err != nil) {
+	if err != nil {
 		beego.Debug(err)
 		c.responseWithState(resFail)
-		return		
-	}	
-	
+		return
+	}
+
 	options := pili.OptionalArguments{
 		Time:      time, // optional, int64, in second, unit timestamp
 		NotifyUrl: notifyUrl,
@@ -535,7 +566,6 @@ func (c *ApiController) ListSegments() {
 	}
 	segments, err := stream.Segments(options)
 
-	
 	if err != nil {
 		beego.Error(err)
 		c.responseWithState(resFail)
@@ -559,14 +589,14 @@ func (c *ApiController) GetStatus() {
 	stream, err := c.getPiliStreamByName(streamName)
 
 	if err != nil {
-		beego.Error("Param error")
+		beego.Error(err)
 		c.responseWithState(resFail)
 		return
 	}
 	status, err := stream.Status()
 
 	if err != nil {
-		beego.Error("Param error")
+		beego.Error(err)
 		c.responseWithState(resFail)
 		return
 	}
